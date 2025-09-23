@@ -198,13 +198,17 @@ def get_reverse_golden_params(
         # Use specified sample size for KL evaluation
         printc(f"    Evaluating KL on {eval_sample_size} samples...", "yellow")
 
-        # Process evaluation in batches
-        for i in range(0, min(len(eval_dataset), eval_sample_size), batch_size):
+        # Process evaluation in batches - ensure we use different samples each time
+        import random
+        eval_indices = list(range(min(len(eval_dataset), eval_sample_size)))
+        random.shuffle(eval_indices)  # Randomize evaluation samples
+
+        for i in range(0, len(eval_indices), batch_size):
             if kl_count >= eval_sample_size:
                 break
 
-            batch_end = min(i + batch_size, len(eval_dataset), eval_sample_size)
-            subset_slice = eval_dataset[i:batch_end]
+            batch_indices = eval_indices[i:i + batch_size]
+            subset_slice = [eval_dataset[idx] for idx in batch_indices]
 
             # Convert to list
             try:
@@ -260,7 +264,17 @@ def get_reverse_golden_params(
                     mask = sparse_mask.to_dense().bool()
                     param.data[mask] = 0
 
-            kl_val = get_kl_divergence(orig, perturbed).mean().item()
+            # Calculate KL divergence with more debugging
+            kl_tensor = get_kl_divergence(orig, perturbed)
+            kl_val = kl_tensor.mean().item()
+
+            # Debug: Print more detailed KL info
+            if kl_count < 3:  # Only for first few batches to avoid spam
+                printc(f"      Batch {kl_count}: KL = {kl_val:.6f}, orig_shape: {orig.shape}, perturbed_shape: {perturbed.shape}", "cyan")
+                printc(f"      Orig mean: {orig.mean().item():.6f}, Perturbed mean: {perturbed.mean().item():.6f}", "cyan")
+                printc(f"      Orig std: {orig.std().item():.6f}, Perturbed std: {perturbed.std().item():.6f}", "cyan")
+                printc(f"      KL std: {kl_tensor.std().item():.6f}, KL min: {kl_tensor.min().item():.6f}, KL max: {kl_tensor.max().item():.6f}", "cyan")
+
             kl_total += kl_val
             kl_count += 1
 

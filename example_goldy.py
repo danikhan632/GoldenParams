@@ -41,11 +41,21 @@ model = model.to(device)
 dataset = load_dataset("danikhan632/standard-qa", split="train")
 eval_dataset = dataset.select(range(min(50, len(dataset))))
 
+# Debug: Print dataset info
+printc(f"Dataset loaded: {len(eval_dataset)} samples", "blue")
+printc(f"First sample: {eval_dataset[0]}", "blue")
+printc(f"Sample type: {type(eval_dataset[0])}", "blue")
+
 def prompt_func(samples, processing_class):
     """Simple prompt function for standard-qa dataset"""
+    import random
+
     # Handle different dataset structures
     questions = []
     answers = []
+
+    # Add some variety to answers to prevent identical prompts
+    answer_options = ["Yes", "No", "Maybe", "True", "False", "Correct", "Possible"]
 
     for sample in samples:
         if isinstance(sample, dict):
@@ -57,19 +67,19 @@ def prompt_func(samples, processing_class):
                 # If it's a text field, try to parse it
                 text = sample["text"]
                 questions.append(text[:100])  # Use first 100 chars as question
-                answers.append("Yes")  # Simple answer
+                answers.append(random.choice(answer_options))  # Random answer for variety
             else:
                 # Fallback for unknown dict structure
                 questions.append(str(sample))
-                answers.append("Yes")
+                answers.append(random.choice(answer_options))
         elif isinstance(sample, str):
             # If sample is a string, use it as question
             questions.append(sample[:100])  # Truncate to reasonable length
-            answers.append("Yes")  # Simple answer
+            answers.append(random.choice(answer_options))  # Random answer for variety
         else:
             # Fallback for any other type
             questions.append(str(sample))
-            answers.append("Yes")
+            answers.append(random.choice(answer_options))
 
     # Create prompt/completion pairs
     prompts = [f"Question: {q}\nAnswer: {a}" for q, a in zip(questions, answers)]
@@ -106,7 +116,7 @@ if __name__ == "__main__":
         prompt_func=prompt_func,
         processing_class=tokenizer,
         top_k_percent=5.0,
-        num_samples=16,
+        num_samples=2048,
         eval_sample_size=8,
         chunk_size=4,
         batch_size=1,
