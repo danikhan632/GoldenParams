@@ -1,0 +1,178 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Pyenv
+.python-version
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Profiling
+.prof
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+ehthumbs.db
+Thumbs.db
+
+# Linux
+*~
+
+# Machine Learning / Data Science specific
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.model
+*.weights
+
+# PyTorch specific
+lightning_logs/
+checkpoints/
+wandb/
+mlruns/
+.tensorboard/
+tensorboard_logs/
+
+# Hugging Face Cache
+.cache/
+huggingface_hub/
+transformers_cache/
+
+# Datasets
+data/
+datasets/
+*.csv
+*.json
+*.jsonl
+*.parquet
+*.arrow
+
+# Notebooks and experiments
+experiments/
+notebooks/
+*.ipynb
+
+# More IDE files
+*.swp
+*.swo
+
+# Project specific files
+reverse_golden_masks.pt
+golden_masks.pt
+*_original.py
+results/
+outputs/
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Configuration files with secrets
+.env.local
+.env.production
+config.json
+secrets.json
+
+# Large model files (additional patterns)
+pytorch_model.bin
+model.safetensors
+*.onnx
+
+# Accelerate cache
+.accelerate/
+
+# Additional Python cache
+pip-wheel-metadata/
+
+# Additional testing
+.pytest_cache/
+
+# Additional coverage
+*.py,cover
+
+# Additional packaging
+pip-wheel-metadata/
+*.egg-info/
