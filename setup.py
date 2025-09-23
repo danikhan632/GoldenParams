@@ -16,10 +16,21 @@ def read_readme():
 
 # Read version from __init__.py
 def get_version():
-    version = {}
-    with open(os.path.join("golden_params", "__init__.py")) as f:
-        exec(f.read(), version)
-    return version.get("__version__", "0.1.0")
+    version_file = os.path.join("golden_params", "__init__.py")
+    if not os.path.exists(version_file):
+        return "0.1.0"
+
+    with open(version_file, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("__version__"):
+                # Extract version string, handling both single and double quotes
+                version_line = line.strip()
+                if "=" in version_line:
+                    version_str = version_line.split("=", 1)[1].strip()
+                    # Remove quotes
+                    version_str = version_str.strip('\'"')
+                    return version_str
+    return "0.1.0"
 
 setup(
     name="golden_params",
@@ -63,11 +74,6 @@ setup(
         "examples": [
             "datasets>=2.0.0",
             "accelerate>=0.12.0",
-        ],
-    },
-    entry_points={
-        "console_scripts": [
-            "golden-params=golden_params.cli:main",
         ],
     },
     keywords=[

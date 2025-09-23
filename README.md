@@ -24,9 +24,7 @@ The Golden Parameters package provides functionality for analyzing parameter imp
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/golden_params.git
-cd golden_params
-pip install -e .
+pip install git+https://github.com/danikhan632/GoldenParams.git
 ```
 
 ### For Development

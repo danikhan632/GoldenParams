@@ -61,8 +61,6 @@ Homepage = "https://github.com/yourusername/golden_params"
 "Source Code" = "https://github.com/yourusername/golden_params"
 Documentation = "https://golden-params.readthedocs.io/"
 
-[project.scripts]
-golden-params = "golden_params.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
