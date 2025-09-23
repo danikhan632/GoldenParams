@@ -24,7 +24,7 @@ torch.manual_seed(420)
 
 compute_dtype = torch.bfloat16
 device = torch.device("cuda")
-model_name = "Qwen/Qwen3-0.6B"
+model_name = "Qwen/Qwen3-4B"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:
@@ -43,8 +43,33 @@ eval_dataset = dataset.select(range(min(50, len(dataset))))
 
 def prompt_func(samples, processing_class):
     """Simple prompt function for standard-qa dataset"""
-    questions = [sample["question"] for sample in samples]
-    answers = [sample["answer"] for sample in samples]
+    # Handle different dataset structures
+    questions = []
+    answers = []
+
+    for sample in samples:
+        if isinstance(sample, dict):
+            # If sample is a dictionary, extract question and answer
+            if "question" in sample and "answer" in sample:
+                questions.append(sample["question"])
+                answers.append(sample["answer"])
+            elif "text" in sample:
+                # If it's a text field, try to parse it
+                text = sample["text"]
+                questions.append(text[:100])  # Use first 100 chars as question
+                answers.append("Yes")  # Simple answer
+            else:
+                # Fallback for unknown dict structure
+                questions.append(str(sample))
+                answers.append("Yes")
+        elif isinstance(sample, str):
+            # If sample is a string, use it as question
+            questions.append(sample[:100])  # Truncate to reasonable length
+            answers.append("Yes")  # Simple answer
+        else:
+            # Fallback for any other type
+            questions.append(str(sample))
+            answers.append("Yes")
 
     # Create prompt/completion pairs
     prompts = [f"Question: {q}\nAnswer: {a}" for q, a in zip(questions, answers)]
