@@ -19,7 +19,7 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 
-from utils import (
+from .utils import (
     printc,
     forward_pass_logprobs_for_fixed_ids,
     get_kl_divergence,

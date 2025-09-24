@@ -18,7 +18,7 @@ from transformers import (
 )
 
 from golden_params import get_reverse_golden_params
-from utils import printc
+from golden_params.utils import printc
 
 torch.manual_seed(420)
 

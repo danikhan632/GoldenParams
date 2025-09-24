@@ -15,12 +15,12 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 import torch.distributed as dist
 
-from utils import (
+from .utils import (
     printc,
     forward_pass_logprobs_for_fixed_ids,
     get_kl_divergence,
+    eval_mode,
 )
-from .utils import eval_mode
 
 
 class GoldilocksMixin:
