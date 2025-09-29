@@ -176,3 +176,4 @@ pip-wheel-metadata/
 # Additional packaging
 pip-wheel-metadata/
 *.egg-info/
+reverse_golden_masks.pt.dense_backup

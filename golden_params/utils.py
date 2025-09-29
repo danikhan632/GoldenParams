@@ -143,13 +143,16 @@ def get_kl_divergence(ref_log_probs: torch.Tensor, z_log_probs: torch.Tensor) ->
 
 def convert_masks_to_sparse_coo(masks_dict):
     """
-    Convert a dictionary of boolean masks to sparse COO tensors.
+    Convert a dictionary of boolean masks to an efficient sparse format.
+
+    Instead of using torch.sparse_coo_tensor (which has large overhead for boolean data),
+    this stores only the indices of True values in a compact format.
 
     Args:
         masks_dict: Dictionary mapping parameter names to boolean mask tensors
 
     Returns:
-        Dictionary mapping parameter names to sparse COO tensors
+        Dictionary mapping parameter names to compact sparse representation
     """
     sparse_masks = {}
     for name, mask in masks_dict.items():
@@ -159,15 +162,47 @@ def convert_masks_to_sparse_coo(masks_dict):
         if mask.dtype != torch.bool:
             raise ValueError(f"Mask for {name} must be boolean tensor")
 
-        # Get indices where mask is True
-        indices = torch.nonzero(mask, as_tuple=False).t()
-        # Create values tensor (all ones for boolean masks)
-        values = torch.ones(indices.shape[1], dtype=torch.float32, device=mask.device)
-        # Create sparse COO tensor
-        sparse_mask = torch.sparse_coo_tensor(
-            indices, values, mask.shape, device=mask.device, dtype=torch.float32
-        ).coalesce()
+        # Get linear indices where mask is True (much more compact)
+        true_indices = torch.nonzero(mask.flatten(), as_tuple=True)[0]
+
+        # Store in compact format with metadata
+        sparse_mask = {
+            'indices': true_indices.to(dtype=torch.int32),  # Use int32 instead of int64 to save space
+            'shape': mask.shape,
+            'nnz': true_indices.numel(),
+            'dtype': 'bool',
+            'layout': 'compact_sparse'
+        }
 
         sparse_masks[name] = sparse_mask
 
     return sparse_masks
+
+
+def convert_sparse_to_dense_mask(sparse_mask):
+    """
+    Convert compact sparse representation back to dense boolean mask.
+
+    Args:
+        sparse_mask: Compact sparse representation from convert_masks_to_sparse_coo
+
+    Returns:
+        Dense boolean tensor
+    """
+    if isinstance(sparse_mask, dict) and sparse_mask.get('layout') == 'compact_sparse':
+        # Handle our compact format
+        indices = sparse_mask['indices']
+        shape = sparse_mask['shape']
+
+        # Create dense boolean tensor
+        mask = torch.zeros(torch.prod(torch.tensor(shape)), dtype=torch.bool)
+        mask[indices.long()] = True  # Convert back to long for indexing
+        return mask.view(shape)
+
+    elif hasattr(sparse_mask, 'is_sparse') and sparse_mask.is_sparse:
+        # Handle standard sparse COO tensors
+        return sparse_mask.to_dense().bool()
+
+    else:
+        # Already dense
+        return sparse_mask
