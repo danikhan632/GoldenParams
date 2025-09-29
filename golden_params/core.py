@@ -23,6 +23,7 @@ from .utils import (
     printc,
     forward_pass_logprobs_for_fixed_ids,
     get_kl_divergence,
+    convert_masks_to_sparse_coo,
 )
 
 
@@ -273,7 +274,8 @@ def get_reverse_golden_params(
                 printc(f"      Batch {kl_count}: KL = {kl_val:.6f}, orig_shape: {orig.shape}, perturbed_shape: {perturbed.shape}", "cyan")
                 printc(f"      Orig mean: {orig.mean().item():.6f}, Perturbed mean: {perturbed.mean().item():.6f}", "cyan")
                 printc(f"      Orig std: {orig.std().item():.6f}, Perturbed std: {perturbed.std().item():.6f}", "cyan")
-                printc(f"      KL std: {kl_tensor.std().item():.6f}, KL min: {kl_tensor.min().item():.6f}, KL max: {kl_tensor.max().item():.6f}", "cyan")
+                kl_std = kl_tensor.std().item() if kl_tensor.numel() > 1 else 0.0
+                printc(f"      KL std: {kl_std:.6f}, KL min: {kl_tensor.min().item():.6f}, KL max: {kl_tensor.max().item():.6f}", "cyan")
 
             kl_total += kl_val
             kl_count += 1
@@ -434,7 +436,9 @@ def get_reverse_golden_params(
     if save_path:
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         if save_path.endswith(".pt"):
-            torch.save({"masks": final_masks, "summary": summary, "kl_divergence": final_kl}, save_path)
+            # Convert boolean masks to sparse COO tensors for efficient storage
+            sparse_masks = convert_masks_to_sparse_coo(final_masks)
+            torch.save({"masks": sparse_masks, "summary": summary, "kl_divergence": final_kl}, save_path)
         elif save_path.endswith(".json"):
             with open(save_path, "w") as f:
                 json.dump({"summary": summary, "kl_divergence": final_kl}, f, indent=2)

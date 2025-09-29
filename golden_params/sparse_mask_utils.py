@@ -227,7 +227,7 @@ class SparseMaskManager:
         sparse_memory = indices_memory + values_memory
         
         # Compare with dense equivalent
-        dense_memory = sparse_mask.numel() * torch.bool().element_size()
+        dense_memory = sparse_mask.numel() * torch.tensor([], dtype=torch.bool).element_size()
         
         return {
             'sparse_memory_bytes': sparse_memory,

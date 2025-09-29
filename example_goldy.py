@@ -24,7 +24,7 @@ torch.manual_seed(420)
 
 compute_dtype = torch.bfloat16
 device = torch.device("cuda")
-model_name = "Qwen/Qwen3-4B"
+model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:

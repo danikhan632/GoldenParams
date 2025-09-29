@@ -20,6 +20,7 @@ from .utils import (
     forward_pass_logprobs_for_fixed_ids,
     get_kl_divergence,
     eval_mode,
+    convert_masks_to_sparse_coo,
 )
 
 
@@ -156,7 +157,9 @@ class GoldilocksMixin:
         if save_path:
             os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
             if save_path.endswith(".pt"):
-                torch.save({"intersection_masks": intersection_masks, "summary": summary}, save_path)
+                # Convert boolean masks to sparse COO tensors for efficient storage
+                sparse_masks = convert_masks_to_sparse_coo(intersection_masks)
+                torch.save({"intersection_masks": sparse_masks, "summary": summary}, save_path)
             elif save_path.endswith(".json"):
                 with open(save_path, "w") as f:
                     json.dump({"summary": summary}, f, indent=2)
@@ -581,7 +584,9 @@ class GoldilocksMixin:
         if save_path:
             os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
             if save_path.endswith(".pt"):
-                torch.save({"masks": final_masks, "summary": summary, "kl_divergence": final_kl}, save_path)
+                # Convert boolean masks to sparse COO tensors for efficient storage
+                sparse_masks = convert_masks_to_sparse_coo(final_masks)
+                torch.save({"masks": sparse_masks, "summary": summary, "kl_divergence": final_kl}, save_path)
             elif save_path.endswith(".json"):
                 with open(save_path, "w") as f:
                     json.dump({"summary": summary, "kl_divergence": final_kl}, f, indent=2)
