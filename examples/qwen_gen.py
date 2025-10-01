@@ -37,7 +37,7 @@ torch.manual_seed(420)
 
 compute_dtype = torch.bfloat16
 device = torch.device("cuda")
-model_name = "Shekswess/trlm-135m"
+model_name = "Qwen/Qwen3-0.6B"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 if tokenizer.pad_token is None:

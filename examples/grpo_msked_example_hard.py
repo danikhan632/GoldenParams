@@ -151,8 +151,11 @@ def check_answer(question: str, potential_solution: str, correct_solution: str):
     else:
         args = json.loads(tool_calls[0].function.arguments)
     print(args)
-
-    return args['is_correct']  # dictionary with is_correct + feedback
+    score = 0.0
+    if args['is_correct']:
+        score+=0.5
+    return score
+    
     
 
 
@@ -219,25 +222,29 @@ def parse_args():
 
 def load_and_prepare_dataset():
     """Load and prepare the GSM8K dataset."""
-    train_dataset = load_dataset("openai/gsm8k", "main", split="train[:5%]")
-    eval_dataset = load_dataset("openai/gsm8k", "main", split="test[:5%]")
+    dataset = load_dataset("reasoning-machines/gsm-hard", split="train")
+
+    # 90/10 split
+    splits = dataset.train_test_split(test_size=0.1, seed=42)
+    train_dataset = splits["train"]
+    eval_dataset = splits["test"]
 
     def make_conversation(example):
         return {
             "prompt": [
-                {"role": "user", "content": example["question"]},
+                {"role": "user", "content": example["input"]},
             ],
-            "answer": example["answer"]  # Keep the answer for evaluation
+            "answer": str(example["target"]) +"\nlogic for answer\n"+ example["code"] 
         }
 
     train_dataset = train_dataset.map(make_conversation)
     eval_dataset = eval_dataset.map(make_conversation)
 
-    # Don't remove the answer column as we need it for evaluation
-    train_dataset = train_dataset.remove_columns(["question"])
-    eval_dataset = eval_dataset.remove_columns(["question"])
+
 
     return train_dataset, eval_dataset
+
+from concurrent.futures import ThreadPoolExecutor
 
 def accuracy_reward(completions, answer: list[str], **kwargs):
     """
@@ -251,31 +258,27 @@ def accuracy_reward(completions, answer: list[str], **kwargs):
     Returns:
         List of reward scores (float)
     """
-    rewards = []
     contents = [completion[0]["content"] for completion in completions]
 
-    for content, reference_answer in zip(contents, answer):
+    # Extract question from prompts if available
+    prompts = kwargs.get('prompts', [])
+    question = ""
+    if prompts and len(prompts) > 0 and len(prompts[0]) > 1:
+        question = prompts[0][1]['content']
 
-        # Extract question from prompts if available
-        prompts = kwargs.get('prompts', [])
-        question = ""
-        if prompts and len(prompts) > 0 and len(prompts[0]) > 1:
-            question = prompts[0][1]['content']
-
-        # Use the check_answer function to evaluate
-        is_correct = check_answer(
+    def evaluate(content, reference_answer):
+        return check_answer(
             question=str(question),
             potential_solution=content,
             correct_solution=reference_answer
         )
-
-        # Convert boolean to float reward
-        reward = 1.0 if is_correct else 0.0
-        rewards.append(reward)
-
-
+        
+    # Run in parallel
+    with ThreadPoolExecutor() as executor:
+        rewards = list(executor.map(evaluate, contents, answer))
 
     return rewards
+
 
 def create_grpo_config(args):
     """Create GRPO configuration from training arguments."""
@@ -303,10 +306,9 @@ def create_grpo_config(args):
         fp16=args.dtype == "float16",
         use_vllm=True,
         vllm_mode="colocate",
-        vllm_kwargs={
-            "kv_cache_memory": 2 * 1024**3,   # 4 GiB
-            "disable_log_stats": False,
-        }
+        # optional tuning parameters:
+        vllm_gpu_memory_utilization=0.05,  # fraction of GPU memory vLLM may use
+
     )
 
 def create_masked_adamw_optimizer(model, sparse_masks, masked_lr, unmasked_lr):
