@@ -13,10 +13,12 @@
 # limitations under the License.
 
 """
-GRPO Example with Golden Parameters Support
+GRPO Example with MaskedAdamW Optimizer
 
 This example demonstrates how to use GRPO (Group Relative Policy Optimization)
-with the golden_params package for efficient sparse mask training.
+with the MaskedAdamW optimizer from golden_params package for efficient sparse
+mask training. The optimizer applies different learning rates to masked vs
+unmasked parameters based on a golden mask.
 
 Dependencies:
     pip install trl math_verify latex2sympy2_extended trackio kernels
@@ -24,12 +26,31 @@ Dependencies:
 For Qwen models:
     pip install num2words==0.5.14
 
-Example usage:
-    python3
-        examples/grpo_example.py \
+Example usage (without golden masks - uses standard AdamW):
+    python3 examples/grpo_msked_example.py \
         --model_name_or_path Shekswess/trlm-135m \
         --output_dir grpo-output \
         --learning_rate 1e-5 \
+        --max_prompt_length 2048 \
+        --max_completion_length 1024 \
+        --log_completions \
+        --per_device_train_batch_size 8 \
+        --num_generations 8 \
+        --importance_sampling_level sequence \
+        --epsilon 3e-4 \
+        --epsilon_high 4e-4 \
+        --beta 0.0 \
+        --loss_type grpo \
+        --gradient_accumulation_steps 2 \
+        --steps_per_generation 8
+
+Example usage (with golden masks - uses MaskedAdamW):
+    python3 examples/grpo_msked_example.py \
+        --model_name_or_path Shekswess/trlm-135m \
+        --output_dir grpo-output \
+        --golden_mask_path ./golden_masks.pt \
+        --masked_lr 1e-3 \
+        --unmasked_lr 1e-5 \
         --max_prompt_length 2048 \
         --max_completion_length 1024 \
         --log_completions \
@@ -53,6 +74,8 @@ from datasets import load_dataset
 
 from trl import GRPOConfig, GRPOTrainer
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from golden_params.optimizers.masked_adamw import MaskedAdamW
+from golden_params.utils import convert_masks_to_torch_sparse_coo
 
 # # Enable logging in a Hugging Face Space
 # os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
@@ -141,6 +164,9 @@ class TrainingArguments:
     logging_steps: int = 10
     push_to_hub: bool = False
     dataset_name: Optional[str] = None
+    golden_mask_path: Optional[str] = None
+    masked_lr: float = 1e-3
+    unmasked_lr: float = 1e-5
 
 def parse_args():
     """Parse command line arguments."""
@@ -167,6 +193,9 @@ def parse_args():
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--push_to_hub", action="store_true")
     parser.add_argument("--dataset_name", type=str, default=None)
+    parser.add_argument("--golden_mask_path", type=str, default=None, help="Path to golden mask .pt file")
+    parser.add_argument("--masked_lr", type=float, default=1e-3, help="Learning rate for masked parameters")
+    parser.add_argument("--unmasked_lr", type=float, default=1e-5, help="Learning rate for unmasked parameters")
 
     args = parser.parse_args()
     return TrainingArguments(**vars(args))
@@ -257,15 +286,25 @@ def create_grpo_config(args):
         fp16=args.dtype == "float16",
     )
 
-def create_adamw_optimizer(model, learning_rate):
-    """Create torch.AdamW optimizer with standard parameters."""
-    return torch.optim.AdamW(
+def create_masked_adamw_optimizer(model, sparse_masks, masked_lr, unmasked_lr):
+    """Create MaskedAdamW optimizer with sparse masks."""
+    optimizer = MaskedAdamW(
         model.parameters(),
-        lr=learning_rate,
+        sparse_masks=sparse_masks,
+        masked_lr=masked_lr,
+        unmasked_lr=unmasked_lr,
         weight_decay=0.01,
         betas=(0.9, 0.999),
         eps=1e-8
     )
+
+    # Add parameter name mapping
+    param_names = {}
+    for name, param in model.named_parameters():
+        param_names[name] = param
+    optimizer.add_param_names(param_names)
+
+    return optimizer
 
 def create_cosine_scheduler(optimizer, num_training_steps, num_warmup_steps=None):
     """Create a cosine annealing scheduler with warmup."""
@@ -294,12 +333,78 @@ def create_trainer(args, train_dataset, eval_dataset):
         # Note: No peft_config since we're not using LoRA/PEFT
     )
 
-    # Override the optimizer creation method
-    original_create_optimizer_and_scheduler = trainer.create_optimizer_and_scheduler
+    # Load golden masks if provided
+    sparse_masks = None
+    if args.golden_mask_path:
+        print(f"Loading golden masks from: {args.golden_mask_path}")
+        try:
+            mask_data = torch.load(args.golden_mask_path, map_location='cpu')
+            # Check if masks are already sparse or need conversion
+            masks = mask_data.get("masks", mask_data.get("intersection_masks", {}))
 
+            # Convert to sparse if they're not already
+            if masks:
+                # Check if all values are sparse COO tensors
+                all_sparse = all(
+                    isinstance(m, torch.Tensor) and m.is_sparse
+                    for m in masks.values()
+                )
+
+                if not all_sparse:
+                    # Need to convert from dense boolean masks to sparse COO tensors
+                    sparse_masks = convert_masks_to_torch_sparse_coo(masks)
+                else:
+                    sparse_masks = masks
+
+            print(f"Loaded masks for {len(sparse_masks)} parameters")
+
+            # Print mask statistics
+            total_params = 0
+            masked_params = 0
+            for mask in sparse_masks.values():
+                if mask.is_sparse:
+                    mask_dense = mask.to_dense()
+                    total_params += mask_dense.numel()
+                    masked_params += mask_dense.count_nonzero().item()
+
+            if total_params > 0:
+                sparsity = (masked_params / total_params * 100)
+                print(f"Mask statistics: {masked_params:,}/{total_params:,} params ({sparsity:.2f}% sparse)")
+        except Exception as e:
+            print(f"Warning: Failed to load golden masks: {e}")
+            print("Falling back to standard AdamW optimizer")
+            sparse_masks = None
+
+    # Override the optimizer creation method
     def create_optimizer_and_scheduler(num_training_steps):
-        # Create AdamW optimizer
-        trainer.optimizer = create_adamw_optimizer(trainer.model, args.learning_rate)
+        if sparse_masks is not None:
+            # Create MaskedAdamW optimizer
+            trainer.optimizer = create_masked_adamw_optimizer(
+                trainer.model,
+                sparse_masks,
+                args.masked_lr,
+                args.unmasked_lr
+            )
+            print(f"Created MaskedAdamW optimizer (masked_lr={args.masked_lr}, unmasked_lr={args.unmasked_lr})")
+
+            # Print optimizer info
+            lr_info = trainer.optimizer.get_lr_info()
+            print(f"  Masks loaded: {lr_info['masks_loaded']}")
+            print(f"  Parameters mapped: {lr_info['param_name_mapping']}")
+            if lr_info['skipped_masks'] > 0:
+                print(f"  ⚠ Skipped masks (shape mismatch): {lr_info['skipped_masks']}")
+                print(f"    (These parameters will use unmasked_lr={args.unmasked_lr})")
+        else:
+            # Fallback to standard AdamW
+            trainer.optimizer = torch.optim.AdamW(
+                trainer.model.parameters(),
+                lr=args.learning_rate,
+                weight_decay=0.01,
+                betas=(0.9, 0.999),
+                eps=1e-8
+            )
+            print(f"Created standard AdamW optimizer (lr={args.learning_rate})")
+
         # Create cosine scheduler
         trainer.lr_scheduler = create_cosine_scheduler(trainer.optimizer, num_training_steps)
 

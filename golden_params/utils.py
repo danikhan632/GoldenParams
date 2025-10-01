@@ -179,6 +179,43 @@ def convert_masks_to_sparse_coo(masks_dict):
     return sparse_masks
 
 
+def convert_masks_to_torch_sparse_coo(masks_dict):
+    """
+    Convert a dictionary of boolean masks to PyTorch sparse COO tensors.
+
+    This is specifically for use with the MaskedAdamW optimizer which requires
+    actual torch.sparse_coo_tensor objects.
+
+    Args:
+        masks_dict: Dictionary mapping parameter names to boolean mask tensors
+
+    Returns:
+        Dictionary mapping parameter names to sparse COO tensors
+    """
+    sparse_masks = {}
+    for name, mask in masks_dict.items():
+        if not isinstance(mask, torch.Tensor):
+            raise ValueError(f"Mask for {name} must be a torch.Tensor")
+
+        if mask.dtype != torch.bool:
+            raise ValueError(f"Mask for {name} must be boolean tensor")
+
+        # Get indices where mask is True
+        indices = torch.nonzero(mask, as_tuple=False).t()
+
+        # Create values tensor (all ones for boolean masks)
+        values = torch.ones(indices.shape[1], dtype=torch.float32, device=mask.device)
+
+        # Create sparse COO tensor
+        sparse_mask = torch.sparse_coo_tensor(
+            indices, values, mask.shape, device=mask.device, dtype=torch.float32
+        ).coalesce()
+
+        sparse_masks[name] = sparse_mask
+
+    return sparse_masks
+
+
 def convert_sparse_to_dense_mask(sparse_mask):
     """
     Convert compact sparse representation back to dense boolean mask.

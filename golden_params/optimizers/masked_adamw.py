@@ -47,6 +47,10 @@ class MaskedAdamW(AdamW):
         # Parameter name mapping for quick lookup
         self._param_name_map = {}
 
+        # Track skipped masks (for mismatched shapes)
+        self._skipped_masks = {}  # param_name -> (mask_shape, param_shape)
+        self._warned_once = False
+
         # Initialize with unmasked learning rate as default
         super().__init__(
             params,
@@ -145,34 +149,51 @@ class MaskedAdamW(AdamW):
 
                     # Validate mask shape matches parameter shape
                     if sparse_mask.shape != param.shape:
-                        raise ValueError(
-                            f"Mask shape {sparse_mask.shape} does not match "
-                            f"parameter shape {param.shape} for '{param_name}'"
-                        )
+                        # Track skipped mask with shape info
+                        if param_name not in self._skipped_masks:
+                            self._skipped_masks[param_name] = (sparse_mask.shape, param.shape)
 
-                    # Apply sparse mask to create masked and unmasked updates
-                    masked_grad, unmasked_grad = self._split_gradient(param.grad, sparse_mask)
+                        # Treat as unmasked parameter
+                        sparse_mask = None
 
-                    if masked_grad is not None:
-                        masked_params.append(param)
-                        masked_grads.append(masked_grad)
+                    if sparse_mask is not None:
+                        # Apply sparse mask to create masked and unmasked updates
+                        masked_grad, unmasked_grad = self._split_gradient(param.grad, sparse_mask)
 
-                        # Initialize state if needed
-                        state = self.state[param]
-                        if len(state) == 0:
-                            self._init_param_state(param, group)
+                        if masked_grad is not None:
+                            masked_params.append(param)
+                            masked_grads.append(masked_grad)
 
-                        masked_exp_avgs.append(state["exp_avg"])
-                        masked_exp_avg_sqs.append(state["exp_avg_sq"])
-                        if group["amsgrad"]:
-                            masked_max_exp_avg_sqs.append(state["max_exp_avg_sq"])
-                        masked_state_steps.append(state["step"])
+                            # Initialize state if needed
+                            state = self.state[param]
+                            if len(state) == 0:
+                                self._init_param_state(param, group)
 
-                    if unmasked_grad is not None:
+                            masked_exp_avgs.append(state["exp_avg"])
+                            masked_exp_avg_sqs.append(state["exp_avg_sq"])
+                            if group["amsgrad"]:
+                                masked_max_exp_avg_sqs.append(state["max_exp_avg_sq"])
+                            masked_state_steps.append(state["step"])
+
+                        if unmasked_grad is not None:
+                            unmasked_params.append(param)
+                            unmasked_grads.append(unmasked_grad)
+
+                            # Use same state objects (they'll be updated with combined effects)
+                            state = self.state[param]
+                            if len(state) == 0:
+                                self._init_param_state(param, group)
+
+                            unmasked_exp_avgs.append(state["exp_avg"])
+                            unmasked_exp_avg_sqs.append(state["exp_avg_sq"])
+                            if group["amsgrad"]:
+                                unmasked_max_exp_avg_sqs.append(state["max_exp_avg_sq"])
+                            unmasked_state_steps.append(state["step"])
+                    else:
+                        # No valid mask - treat as unmasked
                         unmasked_params.append(param)
-                        unmasked_grads.append(unmasked_grad)
+                        unmasked_grads.append(param.grad)
 
-                        # Use same state objects (they'll be updated with combined effects)
                         state = self.state[param]
                         if len(state) == 0:
                             self._init_param_state(param, group)
@@ -200,6 +221,20 @@ class MaskedAdamW(AdamW):
             # Apply updates manually using simplified AdamW logic
             self._apply_updates(masked_params, masked_grads, group["masked_lr"], group)
             self._apply_updates(unmasked_params, unmasked_grads, group["unmasked_lr"], group)
+
+        # Print mismatch summary once after first step
+        if self._skipped_masks and not self._warned_once:
+            self._warned_once = True
+            print("\n" + "=" * 70)
+            print(f"⚠ MaskedAdamW: {len(self._skipped_masks)} masks skipped due to shape mismatch")
+            print("=" * 70)
+            print(f"{'Parameter Name':<50} {'Mask Shape':<20} {'Param Shape':<20}")
+            print("-" * 70)
+            for param_name, (mask_shape, param_shape) in sorted(self._skipped_masks.items()):
+                print(f"{param_name:<50} {str(mask_shape):<20} {str(param_shape):<20}")
+            print("-" * 70)
+            print(f"These {len(self._skipped_masks)} parameters will use unmasked_lr={self.unmasked_lr}")
+            print("=" * 70 + "\n")
 
         return loss
 
@@ -322,6 +357,9 @@ class MaskedAdamW(AdamW):
 
         info["total_masked_parameters"] = total_masked_params
         info["total_unmasked_parameters"] = total_unmasked_params
+        info["skipped_masks"] = len(self._skipped_masks)
+        info["skipped_mask_names"] = list(self._skipped_masks.keys()) if self._skipped_masks else []
+        info["skipped_mask_details"] = self._skipped_masks  # dict of param_name -> (mask_shape, param_shape)
 
         return info
 
