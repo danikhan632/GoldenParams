@@ -9,8 +9,9 @@ import os
 import json
 import math
 import random
+import re
 from itertools import islice
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 from contextlib import contextmanager, nullcontext
 import copy
 
@@ -25,6 +26,71 @@ from .utils import (
     get_kl_divergence,
     convert_masks_to_sparse_coo,
 )
+
+
+def filter_params_by_layer_range(model, layer_pct: float = 30.0) -> Set[str]:
+    """
+    Filter parameters to only include those from the last layer_pct% of layers.
+
+    Args:
+        model: The model to filter parameters from
+        layer_pct: Percentage of layers to include (from the end)
+
+    Returns:
+        Set of parameter names that belong to the last layer_pct% of layers
+    """
+    # Common layer patterns in transformer models
+    layer_patterns = [
+        r'\.layers\.(\d+)\.',      # model.layers.N.
+        r'\.h\.(\d+)\.',            # transformer.h.N.
+        r'\.layer\.(\d+)\.',        # encoder.layer.N.
+        r'\.blocks\.(\d+)\.',       # model.blocks.N.
+    ]
+
+    # Extract layer indices from all parameter names
+    layer_indices = set()
+    param_to_layer = {}
+
+    for name, _ in model.named_parameters():
+        for pattern in layer_patterns:
+            match = re.search(pattern, name)
+            if match:
+                layer_idx = int(match.group(1))
+                layer_indices.add(layer_idx)
+                param_to_layer[name] = layer_idx
+                break
+
+    if not layer_indices:
+        # No layers found, include all parameters
+        printc("Warning: No layer indices found in parameter names. Including all parameters.", "yellow")
+        return set(name for name, _ in model.named_parameters())
+
+    # Sort layer indices
+    sorted_layers = sorted(layer_indices)
+    total_layers = len(sorted_layers)
+
+    # Calculate how many layers to include (last layer_pct%)
+    num_layers_to_include = max(1, int(total_layers * layer_pct / 100.0))
+
+    # Get the layer indices for the last layer_pct%
+    last_layer_indices = set(sorted_layers[-num_layers_to_include:])
+
+    printc(f"Total layers: {total_layers}, including last {num_layers_to_include} layers ({layer_pct}%)", "cyan")
+    printc(f"Layer range: {min(last_layer_indices)} to {max(last_layer_indices)}", "cyan")
+
+    # Filter parameters that belong to these layers OR have no layer index (embeddings, final layer norm, etc.)
+    filtered_params = set()
+    for name, _ in model.named_parameters():
+        if name in param_to_layer:
+            if param_to_layer[name] in last_layer_indices:
+                filtered_params.add(name)
+        # else:
+        #     # Include parameters without layer indices (embeddings, etc.)
+        #     filtered_params.add(name)
+
+    printc(f"Filtered to {len(filtered_params)} parameters in last {layer_pct}% of layers", "green")
+
+    return filtered_params
 
 
 @contextmanager
@@ -60,6 +126,7 @@ def get_reverse_golden_params(
     momentum_factor: float = 0.8,
     exploration_temperature: float = 1.0,
     pad_token_id: int = 4,
+    layer_pct: float = 30.0,
 ) -> Dict[str, Any]:
     """Adaptive reverse Golden Parameter search (standalone version)"""
     from math import ceil
@@ -80,6 +147,9 @@ def get_reverse_golden_params(
     device = next(model.parameters()).device
 
     model.train()
+
+    # Filter to only include last layer_pct% of layers
+    allowed_params = filter_params_by_layer_range(model, layer_pct)
 
     flat_sums: Dict[str, torch.Tensor] = {}
     shapes: Dict[str, torch.Size] = {}
@@ -146,6 +216,9 @@ def get_reverse_golden_params(
     # Precompute target counts for later pruning
     target_counts: Dict[str, int] = {}
     for name, p in model.named_parameters():
+        # Skip parameters not in the allowed layer range
+        if name not in allowed_params:
+            continue
         shapes[name] = p.shape
         target_counts[name] = ceil((target_pct / 100.0) * p.numel())
 
@@ -336,6 +409,9 @@ def get_reverse_golden_params(
             grad_params_updated = 0
             with torch.no_grad():
                 for name, param in model.named_parameters():
+                    # Skip parameters not in the allowed layer range
+                    if name not in allowed_params:
+                        continue
                     if (param.grad is None) or (not param.requires_grad):
                         continue
                     g = param.grad.detach()
